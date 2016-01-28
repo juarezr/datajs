@@ -29,8 +29,8 @@
 
     datajs.version = {
         major: 1,
-        minor: 1,
-        build: 1
+        minor: 3,
+        build: 0
     };
 
 
@@ -98,6 +98,12 @@
         }, 0);
     };
 
+    var inheritsFrom = function (childClass, parentClass) {
+        function inheritance() { }; 
+        inheritance.prototype = parentClass.prototype;
+        childClass.prototype = new inheritance();
+        return childClass;
+    }
 
     var extend = function (target, values) {
         /// <summary>Extends the target with the specified values.</summary>
@@ -2603,6 +2609,10 @@
                 if (request.timeoutMS) {
                     xhr.timeout = request.timeoutMS;
                     xhr.ontimeout = handleTimeout;
+                }
+
+                if (request.withCredentials) {
+                    xhr.withCredentials = request.withCredentials;
                 }
 
                 xhr.send(request.body);
@@ -8220,10 +8230,6 @@
     // Configure the batch handler to use the default handler for the batch parts.
     odata.batchHandler.partHandler = odata.defaultHandler;
 
-
-
-    var localStorage = null;
-
     var domStoreDateToJSON = function () {
         /// <summary>Converts a Date object into an object representation friendly to JSON serialization.</summary>
         /// <returns type="Object">Object that represents the Date.</returns>
@@ -8279,23 +8285,13 @@
         return key.replace(store.name + "#!#", "");
     };
 
-    var DomStore = function (name) {
+    var DomStore = function (name, webStorage) {
         /// <summary>Constructor for store objects that use DOM storage as the underlying mechanism.</summary>
         /// <param name="name" type="String">Store name.</param>
+        /// <param name="storage" type="String">window.localStorage or window.sessionStorage</param>
         this.name = name;
-    };
-
-    DomStore.create = function (name) {
-        /// <summary>Creates a store object that uses DOM Storage as its underlying mechanism.</summary>
-        /// <param name="name" type="String">Store name.</param>
-        /// <returns type="Object">Store object.</returns>
-
-        if (DomStore.isSupported()) {
-            localStorage = localStorage || window.localStorage;
-            return new DomStore(name);
-        }
-
-        throw { message: "Web Storage not supported by the browser" };
+        this.storage = webStorage;
+        return this;
     };
 
     DomStore.isSupported = function () {
@@ -8350,7 +8346,7 @@
                     storedValue = window.JSON.stringify(value);
                 }
                 // Save the json string.
-                localStorage.setItem(fullKey, storedValue);
+                this.storage.setItem(fullKey, storedValue);
                 delay(success, key, value);
             }
             catch (e) {
@@ -8376,13 +8372,13 @@
 
         error = error || this.defaultError;
         try {
-            var i = 0, len = localStorage.length;
+            var i = 0, len = this.storage.length;
             while (len > 0 && i < len) {
-                var fullKey = localStorage.key(i);
+                var fullKey = this.storage.key(i);
                 var key = unqualifyDomStoreKey(this, fullKey);
                 if (fullKey !== key) {
-                    localStorage.removeItem(fullKey);
-                    len = localStorage.length;
+                    this.storage.removeItem(fullKey);
+                    len = this.storage.length;
                 } else {
                     i++;
                 }
@@ -8406,7 +8402,7 @@
         error = error || this.defaultError;
         try {
             var fullKey = qualifyDomStoreKey(this, key);
-            var value = localStorage.getItem(fullKey);
+            var value = this.storage.getItem(fullKey);
             delay(success, value !== null);
         } catch (e) {
             delay(error, e);
@@ -8426,8 +8422,8 @@
         var i, len;
 
         try {
-            for (i = 0, len = localStorage.length; i < len; i++) {
-                var fullKey = localStorage.key(i);
+            for (i = 0, len = this.storage.length; i < len; i++) {
+                var fullKey = this.storage.key(i);
                 var key = unqualifyDomStoreKey(this, fullKey);
                 if (fullKey !== key) {
                     results.push(key);
@@ -8439,9 +8435,6 @@
             delay(error, e);
         }
     };
-
-    /// <summary>Identifies the underlying mechanism used by the store.</summary>
-    DomStore.prototype.mechanism = "dom";
 
     DomStore.prototype.read = function (key, success, error) {
         /// <summary>Reads the value associated to a key in the store.</summary>
@@ -8455,7 +8448,7 @@
         } else {
             try {
                 var fullKey = qualifyDomStoreKey(this, key);
-                var value = localStorage.getItem(fullKey);
+                var value = this.storage.getItem(fullKey);
                 if (value !== null && value !== "undefined") {
                     // Hydrate using json
                     value = window.JSON.parse(value, domStoreJSONToDate);
@@ -8482,7 +8475,7 @@
         } else {
             try {
                 var fullKey = qualifyDomStoreKey(this, key);
-                localStorage.removeItem(fullKey);
+                this.storage.removeItem(fullKey);
                 delay(success);
             } catch (e) {
                 delay(error, e);
@@ -8512,8 +8505,63 @@
     };
 
 
+    var LocalStore = function (name) {
+        /// <summary>Constructor for store objects that use DOM localStorage as the underlying mechanism.</summary>
+        /// <param name="name" type="String">Store name.</param>
 
-    var indexedDB = window.mozIndexedDB || window.webkitIndexedDB || window.msIndexedDB || window.indexedDB;
+        DomStore.call(this, name, window.localStorage);
+        return this;
+    };
+
+    /// <summary>Inhretis all methods from DomStore.</summary>
+    inheritsFrom(LocalStore, DomStore);
+
+    /// <summary>Identifies the underlying mechanism used by the store.</summary>
+    LocalStore.prototype.mechanism = "localstorage";
+
+    LocalStore.create = function (name) {
+        /// <summary>Creates a store object that uses DOM Local Storage as its underlying mechanism.</summary>
+        /// <param name="name" type="String">Store name.</param>
+        /// <returns type="Object">Store object.</returns>
+
+        if (DomStore.isSupported()) {
+
+            return new LocalStore(name);
+        }
+
+        throw { message: "Web Storage not supported by the browser" };
+    };
+
+
+    var SessionStore = function (name) {
+        /// <summary>Constructor for store objects that use DOM sessionStorage as the underlying mechanism.</summary>
+        /// <param name="name" type="String">Store name.</param>
+
+        DomStore.call(this, name, window.sessionStorage);
+        return this;
+    };
+
+    /// <summary>Inhretis all methods from DomStore.</summary>
+    inheritsFrom(SessionStore, DomStore);
+
+    /// <summary>Identifies the underlying mechanism used by the store.</summary>
+    SessionStore.prototype.mechanism = "sessionstorage";
+
+    SessionStore.create = function (name) {
+        /// <summary>Creates a store object that uses DOM Local Storage as its underlying mechanism.</summary>
+        /// <param name="name" type="String">Store name.</param>
+        /// <returns type="Object">Store object.</returns>
+
+        if (DomStore.isSupported()) {
+
+            return new SessionStore(name);
+        }
+
+        throw { message: "Web Storage not supported by the browser" };
+    };
+
+
+    var indexedDB = window.indexedDB || window.mozIndexedDB || window.webkitIndexedDB || window.msIndexedDB;
     var IDBKeyRange = window.IDBKeyRange || window.webkitIDBKeyRange;
     var IDBTransaction = window.IDBTransaction || window.webkitIDBTransaction || {};
 
@@ -9105,7 +9153,8 @@
 
     var mechanisms = {
         indexeddb: IndexedDBStore,
-        dom: DomStore,
+        localstorage: LocalStore,
+        sessionstorage: SessionStore,
         memory: MemoryStore
     };
 
@@ -9114,20 +9163,22 @@
     datajs.createStore = function (name, mechanism) {
         /// <summary>Creates a new store object.</summary>
         /// <param name="name" type="String">Store name.</param>
-        /// <param name="mechanism" type="String" optional="true">A specific mechanism to use (defaults to best, can be "best", "dom", "indexeddb", "webdb").</param>
+        /// <param name="mechanism" type="String" optional="true">A specific mechanism to use (defaults to best, can be "best", "localstorage", "sessionstorage", "indexeddb", "webdb").</param>
         /// <returns type="Object">Store object.</returns>
 
+        name = name || 'datajs';
         if (!mechanism) {
             mechanism = datajs.defaultStoreMechanism;
         }
 
         if (mechanism === "best") {
-            mechanism = (DomStore.isSupported()) ? "dom" : "memory";
+            mechanism = (DomStore.isSupported()) ? "localstorage" : "memory";
         }
 
         var factory = mechanisms[mechanism];
         if (factory) {
-            return factory.create(name);
+            var res = factory.create(name);
+            return res;
         }
 
         throw { message: "Failed to create store", name: name, mechanism: mechanism };
